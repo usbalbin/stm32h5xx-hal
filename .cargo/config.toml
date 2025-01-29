@@ -3,6 +3,7 @@ runner = 'arm-none-eabi-gdb'
 rustflags = [
   # LLD (shipped with the Rust toolchain) is used as the default linker
   "-C", "link-arg=-Tlink.x",
+  "-C", "link-arg=-Tdefmt.x",
 ]
 
 [build]
