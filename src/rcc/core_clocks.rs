@@ -31,6 +31,14 @@ pub struct CoreClocks {
     pub(super) pll2_p_ck: Option<Hertz>,
     pub(super) pll2_q_ck: Option<Hertz>,
     pub(super) pll2_r_ck: Option<Hertz>,
+
+    #[cfg(feature = "rm0481")]
+    pub(super) pll3_p_ck: Option<Hertz>,
+    #[cfg(feature = "rm0481")]
+    pub(super) pll3_q_ck: Option<Hertz>,
+    #[cfg(feature = "rm0481")]
+    pub(super) pll3_r_ck: Option<Hertz>,
+
     pub(super) timx_ker_ck: Hertz,
     pub(super) timy_ker_ck: Hertz,
     pub(super) sys_ck: Hertz,
@@ -121,6 +129,13 @@ impl CoreClocks {
         pll2_p_ck,
         pll2_q_ck,
         pll2_r_ck,
+    }
+
+    #[cfg(feature = "rm0481")]
+    pll_getter! {
+        pll3_p_ck,
+        pll3_q_ck,
+        pll3_r_ck,
     }
 
     /// Returns the input frequency to the SCGU

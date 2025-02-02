@@ -93,16 +93,9 @@ fn vco_output_divider_setup(
         (pllcfg.r_ck, true),
     ]
     .into_iter()
-    .filter(|it| it.0.is_some())
     // Multiply output for PLL where P cannot be odd, so that the max output frequency
     // considered is PLLP * 2
-    .map(|it| {
-        if it.1 {
-            it.0.unwrap()
-        } else {
-            it.0.unwrap() * 2
-        }
-    });
+    .filter_map(|it| if it.1 { Some(it.0?) } else { Some(it.0? * 2) });
 
     let (min_output, max_output): (u32, u32) =
         outputs.fold((0, 0), |minmax, ck| {
@@ -328,6 +321,9 @@ fn calc_vco_ck(ref_ck: u32, pll_n: u32, pll_fracn: u16) -> u32 {
 impl Rcc {
     pll_setup! {pll1, false}
     pll_setup! {pll2, true}
+
+    #[cfg(feature = "rm0481")]
+    pll_setup! {pll3, true}
 }
 
 #[cfg(test)]
