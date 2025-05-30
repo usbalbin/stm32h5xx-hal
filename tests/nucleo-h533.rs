@@ -23,6 +23,24 @@ mod tests {
     use stm32h5xx_hal::gpio::{PinExt, Pull};
 
     #[test]
+    fn gpio_settings() {
+        use super::*;
+
+        let (gpioa, _) = init();
+        let pin = gpioa.pa8;
+        let pin = pin.into_floating_input();
+        let pin = pin.into_analog();
+        let pin = pin.into_push_pull_output();
+        let pin = pin.into_open_drain_output();
+        let pin: gpio::Pin<'A', 8, gpio::Alternate<7>> = pin.into_alternate();
+        let mut pin: gpio::Pin<'A', 8, gpio::Alternate<15>> =
+            pin.into_alternate();
+
+        pin.set_speed(gpio::Speed::Low);
+        pin.set_speed(gpio::Speed::VeryHigh);
+    }
+
+    #[test]
     fn gpio_resistors() {
         use super::*;
 
