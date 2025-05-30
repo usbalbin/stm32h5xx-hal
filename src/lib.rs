@@ -1,4 +1,4 @@
-#![cfg_attr(not(test), no_std)]
+#![cfg_attr(target_os = "none", no_std)]
 #![cfg_attr(docsrs, feature(doc_cfg))]
 #![allow(non_camel_case_types)]
 
