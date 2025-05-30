@@ -18,6 +18,17 @@ use embedded_hal::delay::DelayNs;
 use fugit::RateExtU32;
 use stm32h5xx_hal::{delay::Delay, gpio::GpioExt, pwr::PwrExt, rcc::RccExt};
 
+fn print_registers() {
+    let gpioa = unsafe { stm32::GPIOA::steal() };
+    defmt::println!("afrl.afrel0: {}", gpioa.afrl().read().afrel0().variant());
+    defmt::println!("afrh.afrel8: {}", gpioa.afrh().read().afrel8().variant());
+    defmt::println!("moder.mode8: {}", gpioa.moder().read().mode8().variant());
+    defmt::println!("ospeedr.ospeed8: {}", gpioa.ospeedr().read().ospeed8().variant());
+    defmt::println!("otyper.ot8: {}", gpioa.otyper().read().ot8().variant());
+    defmt::println!("pupdr.pupd8: {}", gpioa.pupdr().read().pupd8().variant());
+    defmt::println!("");
+}
+
 #[embedded_test::tests]
 mod tests {
     use stm32h5xx_hal::gpio::{PinExt, Pull};
@@ -28,16 +39,49 @@ mod tests {
 
         let (gpioa, _) = init();
         let pin = gpioa.pa8;
-        let pin = pin.into_floating_input();
+        defmt::println!("Init:");
+        print_registers();
+
+        let mut pin = pin.into_floating_input();
+        defmt::println!("floating_input:");
+        print_registers();
+
+        pin.set_internal_resistor(Pull::Up);
+        defmt::println!("resistor Up:");
+        print_registers();
+
+        pin.set_internal_resistor(Pull::Down);
+        defmt::println!("resistor Down:");
+        print_registers();
+
         let pin = pin.into_analog();
+        defmt::println!("analog:");
+        print_registers();
+
         let pin = pin.into_push_pull_output();
+        defmt::println!("push_pull_output:");
+        print_registers();
+
         let pin = pin.into_open_drain_output();
+        defmt::println!("open_drain_output:");
+        print_registers();
+
         let pin: gpio::Pin<'A', 8, gpio::Alternate<7>> = pin.into_alternate();
+        defmt::println!("alternate 7:");
+        print_registers();
+
         let mut pin: gpio::Pin<'A', 8, gpio::Alternate<15>> =
             pin.into_alternate();
+        defmt::println!("alternate 15:");
+        print_registers();
 
         pin.set_speed(gpio::Speed::Low);
+        defmt::println!("Speed Low:");
+        print_registers();
+
+        defmt::println!("Speed VeryHigh:");
         pin.set_speed(gpio::Speed::VeryHigh);
+        print_registers();
     }
 
     #[test]
