@@ -1,24 +1,30 @@
 use super::{
-    Error, Instance, Op, Read, Spi, Transaction, Transfer, TransferInplace,
+    config::communication_mode, CommunicationMode, Error, Instance, Op, Read,
+    Spi, Transaction, Transfer, TransferInplace, TransferWordsNonBlocking,
     Word, Write,
 };
 
-/// Trait that provides non-blocking SPI operations.
-pub trait NonBlocking<W: Word> {
+/// Trait that provides non-blocking SPI Read operations.
+pub trait NonBlockingRead<W: Word> {
     /// Start a non-blocking read operation. This will return a [`Transaction`] that can be processed
     /// by calling [`NonBlocking::transfer_nonblocking`] until it completes.
     fn start_nonblocking_read<'a>(
         &mut self,
         buf: &'a mut [W],
     ) -> Result<Transaction<Read<'a, W>, W>, Error>;
-
+}
+/// Trait that provides non-blocking SPI Write operations.
+pub trait NonBlockingWrite<W: Word> {
     /// Start a non-blocking write operation. This will return a [`Transaction`] that can be processed
     /// by calling [`NonBlocking::transfer_nonblocking`] until it completes.
     fn start_nonblocking_write<'a>(
         &mut self,
         words: &'a [W],
     ) -> Result<Transaction<Write<'a, W>, W>, Error>;
+}
 
+/// Trait that provides non-blocking SPI Write operations.
+pub trait NonBlockingTransfer<W: Word> {
     /// Start a non-blocking full duplex transfer operation. This will return a [`Transaction`] that
     /// can be processed by calling [`NonBlocking::transfer_nonblocking`] until it completes.
     fn start_nonblocking_duplex_transfer<'a>(
@@ -48,21 +54,39 @@ pub trait NonBlocking<W: Word> {
     ) -> Result<Option<Transaction<OP, W>>, Error>;
 }
 
-impl<SPI: Instance, W: Word> NonBlocking<W> for Spi<SPI, W> {
+impl<
+        SPI: Instance,
+        MODE: CommunicationMode<SUPPORTS_READ = super::Yes>,
+        W: Word,
+    > NonBlockingRead<W> for Spi<SPI, MODE, W>
+{
     fn start_nonblocking_read<'a>(
         &mut self,
         buf: &'a mut [W],
     ) -> Result<Transaction<Read<'a, W>, W>, Error> {
         self.start_read(buf)
     }
-
+}
+impl<
+        SPI: Instance,
+        MODE: CommunicationMode<SUPPORTS_WRITE = super::Yes>,
+        W: Word,
+    > NonBlockingWrite<W> for Spi<SPI, MODE, W>
+{
     fn start_nonblocking_write<'a>(
         &mut self,
         words: &'a [W],
     ) -> Result<Transaction<Write<'a, W>, W>, Error> {
         self.start_write(words)
     }
+}
 
+impl<SPI: Instance, W: Word> NonBlockingTransfer<W>
+    for Spi<SPI, communication_mode::FullDuplex, W>
+where
+    super::Inner<SPI, communication_mode::FullDuplex, W>:
+        TransferWordsNonBlocking<W>,
+{
     fn start_nonblocking_duplex_transfer<'a>(
         &mut self,
         read: &'a mut [W],

@@ -177,8 +177,8 @@ pub struct Transaction<OP, W> {
     _word_type: PhantomData<W>,
 }
 
-impl<'a, OP, W> Transaction<OP, W> {
-    pub(super) fn read(buf: &'a mut [W]) -> Transaction<Read<'a, W>, W> {
+impl<'a, W> Transaction<Read<'a, W>, W> {
+    pub(super) fn read(buf: &'a mut [W]) -> Self {
         Transaction::<Read<'a, W>, W> {
             op: Read {
                 read_idx: 0,
@@ -188,8 +188,10 @@ impl<'a, OP, W> Transaction<OP, W> {
             _word_type: PhantomData,
         }
     }
+}
 
-    pub(super) fn write(out: &'a [W]) -> Transaction<Write<'a, W>, W> {
+impl<'a, W> Transaction<Write<'a, W>, W> {
+    pub(super) fn write(out: &'a [W]) -> Self {
         Transaction::<Write<'a, W>, W> {
             op: Write {
                 read_idx: 0,
@@ -199,7 +201,9 @@ impl<'a, OP, W> Transaction<OP, W> {
             _word_type: PhantomData,
         }
     }
+}
 
+impl<'a, W> Transaction<Transfer<'a, W>, W> {
     pub(super) fn transfer(
         write: &'a [W],
         read: &'a mut [W],
@@ -214,7 +218,9 @@ impl<'a, OP, W> Transaction<OP, W> {
             _word_type: PhantomData,
         }
     }
+}
 
+impl<'a, W> Transaction<TransferInplace<'a, W>, W> {
     pub(super) fn transfer_inplace(
         buf: &'a mut [W],
     ) -> Transaction<TransferInplace<'a, W>, W> {

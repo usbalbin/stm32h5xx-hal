@@ -1,42 +1,70 @@
 use crate::stm32::spi1::cfg2::COMM;
 
-use super::{Mode, Polarity};
+use super::{Instance, Mode, Polarity};
+
+pub struct Yes;
+pub struct No;
 
 /// Specifies the communication mode of the SPI interface.
-#[derive(Copy, Clone, PartialEq)]
-pub enum CommunicationMode {
+pub trait CommunicationMode {
+    const COMM: COMM;
+    type SUPPORTS_WRITE;
+    type SUPPORTS_READ;
+    fn is_transmitter<SPI: Instance>(spi: &SPI) -> bool;
+}
+
+pub mod communication_mode {
     /// Both RX and TX are used on separate wires. This is the default communications mode
-    FullDuplex,
+    #[derive(Debug, PartialEq)]
+    #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+    pub struct FullDuplex;
 
     /// RX and TX are used on a single wire.
-    HalfDuplex,
+    #[derive(Debug, PartialEq)]
+    #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+    pub struct HalfDuplex;
 
     /// Only the SPI TX functionality is used on a single wire.
-    SimplexTransmitter,
+    #[derive(Debug, PartialEq)]
+    #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+    pub struct SimplexTransmitter;
 
     /// Only the SPI RX functionality is used on a single wire.
-    SimplexReceiver,
+    #[derive(Debug, PartialEq)]
+    #[cfg_attr(feature = "defmt", derive(defmt::Format))]
+    pub struct SimplexReceiver;
 }
 
-impl From<COMM> for CommunicationMode {
-    fn from(value: COMM) -> Self {
-        match value {
-            COMM::Transmitter => CommunicationMode::SimplexTransmitter,
-            COMM::Receiver => CommunicationMode::SimplexReceiver,
-            COMM::FullDuplex => CommunicationMode::FullDuplex,
-            COMM::HalfDuplex => CommunicationMode::HalfDuplex,
-        }
+impl CommunicationMode for communication_mode::FullDuplex {
+    const COMM: COMM = COMM::FullDuplex;
+    type SUPPORTS_WRITE = Yes;
+    type SUPPORTS_READ = Yes;
+    fn is_transmitter<SPI: Instance>(_spi: &SPI) -> bool {
+        true
     }
 }
-
-impl From<CommunicationMode> for COMM {
-    fn from(value: CommunicationMode) -> Self {
-        match value {
-            CommunicationMode::SimplexTransmitter => COMM::Transmitter,
-            CommunicationMode::SimplexReceiver => COMM::Receiver,
-            CommunicationMode::FullDuplex => COMM::FullDuplex,
-            CommunicationMode::HalfDuplex => COMM::HalfDuplex,
-        }
+impl CommunicationMode for communication_mode::HalfDuplex {
+    const COMM: COMM = COMM::HalfDuplex;
+    type SUPPORTS_WRITE = Yes;
+    type SUPPORTS_READ = Yes;
+    fn is_transmitter<SPI: Instance>(spi: &SPI) -> bool {
+        spi.cr1().read().hddir().is_transmitter()
+    }
+}
+impl CommunicationMode for communication_mode::SimplexTransmitter {
+    const COMM: COMM = COMM::Transmitter;
+    type SUPPORTS_WRITE = Yes;
+    type SUPPORTS_READ = No;
+    fn is_transmitter<SPI: Instance>(_spi: &SPI) -> bool {
+        true
+    }
+}
+impl CommunicationMode for communication_mode::SimplexReceiver {
+    const COMM: COMM = COMM::Receiver;
+    type SUPPORTS_WRITE = No;
+    type SUPPORTS_READ = Yes;
+    fn is_transmitter<SPI: Instance>(_spi: &SPI) -> bool {
+        false
     }
 }
 
@@ -66,7 +94,6 @@ pub struct Config {
     pub(super) swap_miso_mosi: bool,
     pub(super) hardware_cs: HardwareCS,
     pub(super) inter_word_delay: f32,
-    pub(super) communication_mode: CommunicationMode,
     pub(super) endianness: Endianness,
 }
 
@@ -85,7 +112,6 @@ impl Config {
                 polarity: Polarity::IdleHigh,
             },
             inter_word_delay: 0.0,
-            communication_mode: CommunicationMode::FullDuplex,
             endianness: Endianness::MsbFirst,
         }
     }
@@ -121,13 +147,6 @@ impl Config {
     #[must_use]
     pub fn inter_word_delay(mut self, inter_word_delay: f32) -> Self {
         self.inter_word_delay = inter_word_delay;
-        self
-    }
-
-    /// Select the communication mode of the SPI bus.
-    #[must_use]
-    pub fn communication_mode(mut self, mode: CommunicationMode) -> Self {
-        self.communication_mode = mode;
         self
     }
 

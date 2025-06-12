@@ -137,6 +137,8 @@ use core::marker::PhantomData;
 use core::ops::Deref;
 use core::ptr;
 
+use config::communication_mode;
+use config::Yes;
 pub use embedded_hal::spi::{
     Mode, Phase, Polarity, MODE_0, MODE_1, MODE_2, MODE_3,
 };
@@ -153,6 +155,7 @@ pub mod nonblocking;
 mod spi_def;
 mod transaction;
 
+use crate::pac::spi1::cfg2::COMM;
 pub use config::{
     CommunicationMode, Config, Endianness, HardwareCS, HardwareCSMode,
 };
@@ -226,16 +229,16 @@ pub struct NoMiso;
 pub struct NoMosi;
 
 #[derive(Debug)]
-pub struct Inner<SPI, W: Word> {
+pub struct Inner<SPI, MODE, W: Word> {
     spi: SPI,
+    _mode: PhantomData<MODE>,
     _word: PhantomData<W>,
 }
 
 /// Spi in Master mode
 #[derive(Debug)]
-pub struct Spi<SPI, W: Word = u8> {
-    inner: Inner<SPI, W>,
-    _word: PhantomData<W>,
+pub struct Spi<SPI, MODE: CommunicationMode, W: Word = u8> {
+    inner: Inner<SPI, MODE, W>,
 }
 
 // Implemented by all SPI instances
@@ -282,7 +285,7 @@ pub trait SpiExt<SPI: Instance + SupportedWordSize<W>, W: Word = u8> {
         freq: Hertz,
         rec: SPI::Rec,
         clocks: &CoreClocks,
-    ) -> Spi<SPI, W>
+    ) -> Spi<SPI, communication_mode::FullDuplex, W>
     where
         PINS: Pins<SPI>,
         CONFIG: Into<Config>;
@@ -293,31 +296,61 @@ pub trait SpiExt<SPI: Instance + SupportedWordSize<W>, W: Word = u8> {
         freq: Hertz,
         rec: SPI::Rec,
         clocks: &CoreClocks,
-    ) -> Spi<SPI, W>
+    ) -> Spi<SPI, communication_mode::FullDuplex, W>
     where
         CONFIG: Into<Config>;
-}
 
-impl<SPI: Instance + SupportedWordSize<W>, W: Word> SpiExt<SPI, W> for SPI {
-    fn spi<PINS, CONFIG>(
+    fn spi_half_duplex<PINS, CONFIG>(
         self,
         _pins: PINS,
         config: CONFIG,
         freq: Hertz,
         rec: SPI::Rec,
         clocks: &CoreClocks,
-    ) -> Spi<SPI, W>
+    ) -> Spi<SPI, communication_mode::HalfDuplex, W>
+    where
+        PINS: Pins<SPI>,
+        CONFIG: Into<Config>;
+
+    fn spi_receiver<PINS, CONFIG>(
+        self,
+        _pins: PINS,
+        config: CONFIG,
+        freq: Hertz,
+        rec: SPI::Rec,
+        clocks: &CoreClocks,
+    ) -> Spi<SPI, communication_mode::SimplexReceiver, W>
+    where
+        PINS: Pins<SPI>,
+        CONFIG: Into<Config>;
+
+    fn spi_transmitter<PINS, CONFIG>(
+        self,
+        _pins: PINS,
+        config: CONFIG,
+        freq: Hertz,
+        rec: SPI::Rec,
+        clocks: &CoreClocks,
+    ) -> Spi<SPI, communication_mode::SimplexTransmitter, W>
+    where
+        PINS: Pins<SPI>,
+        CONFIG: Into<Config>;
+}
+
+impl<SPI: Instance + SupportedWordSize<W>, W: Word> SpiExt<SPI, W> for SPI {
+    fn spi<PINS, CONFIG>(
+        self,
+        pins: PINS,
+        config: CONFIG,
+        freq: Hertz,
+        rec: SPI::Rec,
+        clocks: &CoreClocks,
+    ) -> Spi<SPI, communication_mode::FullDuplex, W>
     where
         PINS: Pins<SPI>,
         CONFIG: Into<Config>,
     {
-        let config = config.into();
-        assert_eq!(
-            config.hardware_cs.enabled(),
-            PINS::HCS_PRESENT,
-            "If the hardware cs is enabled in the config, an HCS pin must be present in the given pins"
-        );
-        Spi::<SPI, W>::new(self, config, freq, rec, clocks)
+        Spi::new(self, pins, config, freq, rec, clocks)
     }
 
     fn spi_unchecked<CONFIG>(
@@ -326,11 +359,57 @@ impl<SPI: Instance + SupportedWordSize<W>, W: Word> SpiExt<SPI, W> for SPI {
         freq: Hertz,
         rec: SPI::Rec,
         clocks: &CoreClocks,
-    ) -> Spi<SPI, W>
+    ) -> Spi<SPI, communication_mode::FullDuplex, W>
     where
         CONFIG: Into<Config>,
     {
-        Spi::<SPI, W>::new(self, config, freq, rec, clocks)
+        let config = config.into();
+        Spi::new_unchecked(self, config, freq, rec, clocks)
+    }
+
+    fn spi_half_duplex<PINS, CONFIG>(
+        self,
+        pins: PINS,
+        config: CONFIG,
+        freq: Hertz,
+        rec: SPI::Rec,
+        clocks: &CoreClocks,
+    ) -> Spi<SPI, communication_mode::HalfDuplex, W>
+    where
+        PINS: Pins<SPI>,
+        CONFIG: Into<Config>,
+    {
+        Spi::new(self, pins, config, freq, rec, clocks)
+    }
+
+    fn spi_receiver<PINS, CONFIG>(
+        self,
+        pins: PINS,
+        config: CONFIG,
+        freq: Hertz,
+        rec: SPI::Rec,
+        clocks: &CoreClocks,
+    ) -> Spi<SPI, communication_mode::SimplexReceiver, W>
+    where
+        PINS: Pins<SPI>,
+        CONFIG: Into<Config>,
+    {
+        Spi::new(self, pins, config, freq, rec, clocks)
+    }
+
+    fn spi_transmitter<PINS, CONFIG>(
+        self,
+        pins: PINS,
+        config: CONFIG,
+        freq: Hertz,
+        rec: SPI::Rec,
+        clocks: &CoreClocks,
+    ) -> Spi<SPI, communication_mode::SimplexTransmitter, W>
+    where
+        PINS: Pins<SPI>,
+        CONFIG: Into<Config>,
+    {
+        Spi::new(self, pins, config, freq, rec, clocks)
     }
 }
 
@@ -347,8 +426,25 @@ fn calc_mbr(spi_ker_ck: u32, spi_freq: u32) -> MBR {
     }
 }
 
-impl<SPI: Instance, W: Word> Spi<SPI, W> {
-    fn new(
+impl<SPI: Instance, MODE: CommunicationMode, W: Word> Spi<SPI, MODE, W> {
+    fn new<PINS: Pins<SPI>>(
+        spi: SPI,
+        _pins: PINS,
+        config: impl Into<Config>,
+        freq: Hertz,
+        rec: SPI::Rec,
+        clocks: &CoreClocks,
+    ) -> Self {
+        let config = config.into();
+        assert_eq!(
+            config.hardware_cs.enabled(),
+            PINS::HCS_PRESENT,
+            "If the hardware cs is enabled in the config, an HCS pin must be present in the given pins"
+        );
+        Self::new_unchecked(spi, config, freq, rec, clocks)
+    }
+
+    fn new_unchecked(
         spi: SPI,
         config: impl Into<Config>,
         freq: Hertz,
@@ -360,7 +456,6 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
 
         let spi = Spi {
             inner: Inner::new(spi),
-            _word: PhantomData,
         };
         spi.init(config, freq, SPI::clock(clocks))
     }
@@ -447,7 +542,7 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
                 .ioswp()
                 .bit(config.swap_miso_mosi)
                 .comm()
-                .variant(config.communication_mode.into())
+                .variant(MODE::COMM)
                 .ssiop()
                 .variant(cs_polarity)
         });
@@ -472,10 +567,11 @@ macro_rules! check_status_error {
     };
 }
 
-impl<SPI: Instance, W: Word> Inner<SPI, W> {
+impl<SPI: Instance, MODE: CommunicationMode, W: Word> Inner<SPI, MODE, W> {
     fn new(spi: SPI) -> Self {
         Self {
             spi,
+            _mode: PhantomData,
             _word: PhantomData,
         }
     }
@@ -490,29 +586,16 @@ impl<SPI: Instance, W: Word> Inner<SPI, W> {
         self.spi.cr1().modify(|_, w| w.spe().disabled());
     }
 
-    /// Read the SPI communication mode
-    fn communication_mode(&self) -> CommunicationMode {
-        self.spi.cfg2().read().comm().variant().into()
-    }
-
     /// Determine if SPI is a transmitter
     fn is_transmitter(&self) -> bool {
-        match self.communication_mode() {
-            CommunicationMode::FullDuplex => true,
-            CommunicationMode::HalfDuplex => self.is_half_duplex_transmitter(),
-            CommunicationMode::SimplexTransmitter => true,
-            CommunicationMode::SimplexReceiver => false,
-        }
+        MODE::is_transmitter(&self.spi)
     }
 
     /// Set SPI to transmit mode in half duplex operation
     /// Only valid in half duplex operation. This is provided for non-blocking calls to be able to
     /// change direction of communication. Blocking calls already handle this
     pub fn set_dir_transmitter(&self) {
-        assert!(matches!(
-            self.communication_mode(),
-            CommunicationMode::HalfDuplex
-        ));
+        assert!(matches!(MODE::COMM, COMM::HalfDuplex));
 
         self.spi.cr1().modify(|_, w| w.hddir().transmitter());
     }
@@ -521,16 +604,9 @@ impl<SPI: Instance, W: Word> Inner<SPI, W> {
     /// Only valid in half duplex operation. This is provided for non-blocking calls to be able to
     /// change direction of communication. Blocking calls already handle this
     pub fn set_dir_receiver(&self) {
-        assert!(matches!(
-            self.communication_mode(),
-            CommunicationMode::HalfDuplex
-        ));
+        assert!(matches!(MODE::COMM, COMM::HalfDuplex));
 
         self.spi.cr1().modify(|_, w| w.hddir().receiver());
-    }
-
-    fn is_half_duplex_transmitter(&self) -> bool {
-        self.spi.cr1().read().hddir().is_transmitter()
     }
 
     /// Set the word size for a transaction. Can only be changed when the peripheral is disabled
@@ -597,7 +673,12 @@ impl<SPI: Instance, W: Word> Inner<SPI, W> {
             Ok(false)
         }
     }
+}
 
+impl<SPI: Instance, MODE: CommunicationMode, W: Word> Inner<SPI, MODE, W>
+where
+    Self: TransferWordsNonBlocking<W>,
+{
     /// Fill the TX FIFO. Will write to the TX fifo until it is full. The
     /// amount of words written are returned wrapped in the Ok value.
     #[inline(always)]
@@ -653,7 +734,7 @@ impl<SPI: Instance, W: Word> Inner<SPI, W> {
     /// Write operation for a partial transaction. For use in multi-operation transactions via
     /// embedded-hal's SpiDevice trait.
     fn write_partial(&mut self, words: &[W]) -> Result<(), Error> {
-        let mut write = Transaction::<Write<W>, W>::write(words);
+        let mut write = Transaction::write(words);
         while !write.is_complete() {
             self.transfer_words_nonblocking(&mut write)?;
         }
@@ -664,7 +745,7 @@ impl<SPI: Instance, W: Word> Inner<SPI, W> {
     /// Read operation for a partial transaction. For use in multi-operation transactions via
     /// embedded-hal's SpiDevice trait.
     fn read_partial(&mut self, words: &mut [W]) -> Result<(), Error> {
-        let mut read = Transaction::<Read<W>, W>::read(words);
+        let mut read = Transaction::read(words);
         while !read.is_complete() {
             self.transfer_words_nonblocking(&mut read)?;
         }
@@ -679,7 +760,7 @@ impl<SPI: Instance, W: Word> Inner<SPI, W> {
         read: &mut [W],
         write: &[W],
     ) -> Result<(), Error> {
-        let mut transfer = Transaction::<Transfer<W>, W>::transfer(write, read);
+        let mut transfer = Transaction::transfer(write, read);
         while !transfer.is_complete() {
             self.transfer_words_nonblocking(&mut transfer)?;
         }
@@ -693,8 +774,7 @@ impl<SPI: Instance, W: Word> Inner<SPI, W> {
         &mut self,
         words: &mut [W],
     ) -> Result<(), Error> {
-        let mut transfer =
-            Transaction::<TransferInplace<W>, W>::transfer_inplace(words);
+        let mut transfer = Transaction::transfer_inplace(words);
         while !transfer.is_complete() {
             self.transfer_words_nonblocking(&mut transfer)?;
         }
@@ -719,7 +799,12 @@ impl<SPI: Instance, W: Word> Inner<SPI, W> {
         transaction.advance_read_idx(count);
         Ok(())
     }
+}
 
+impl<SPI: Instance, MODE: CommunicationMode, W: Word> Inner<SPI, MODE, W>
+where
+    Self: TransferWordsNonBlocking<W>,
+{
     /// Transfers words in a non-blocking manner. This function drives all SPI read/write/transfer
     /// operations in this driver.
     ///
@@ -733,17 +818,43 @@ impl<SPI: Instance, W: Word> Inner<SPI, W> {
         &mut self,
         transaction: &mut Transaction<OP, W>,
     ) -> Result<(), Error> {
-        if !transaction.is_write_complete() {
-            self.write_words_nonblocking(transaction)?;
-        }
+        self.handle_write(transaction);
+        self.handle_read(transaction)
+    }
+}
 
-        // Keep writing to SPI if data to read is longer than data to write
-        let flush_remainder = transaction.tx_flush_remainder();
-        if transaction.is_write_complete() && flush_remainder > 0 {
-            let count = self.flush_tx_fifo(flush_remainder)?;
-            transaction.advance_write_idx(count)
-        }
+trait TransferWordsNonBlocking<W: Word>:
+    TransferWordsNonBlockingRead<W> + TransferWordsNonBlockingWrite<W>
+{
+}
 
+trait TransferWordsNonBlockingRead<W: Word> {
+    fn handle_read<OP: Op<W>>(
+        &mut self,
+        _transaction: &mut Transaction<OP, W>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+trait TransferWordsNonBlockingWrite<W: Word> {
+    fn handle_write<OP: Op<W>>(
+        &mut self,
+        _transaction: &mut Transaction<OP, W>,
+    ) -> Result<(), Error> {
+        Ok(())
+    }
+}
+
+impl<SPI: Instance, MODE: CommunicationMode<SUPPORTS_READ = Yes>, W: Word>
+    TransferWordsNonBlockingRead<W> for Inner<SPI, MODE, W>
+where
+    Self: TransferWordsNonBlocking<W>,
+{
+    fn handle_read<OP: Op<W>>(
+        &mut self,
+        transaction: &mut Transaction<OP, W>,
+    ) -> Result<(), Error> {
         if !transaction.is_read_complete() {
             self.read_words_nonblocking(transaction)?;
         }
@@ -759,7 +870,31 @@ impl<SPI: Instance, W: Word> Inner<SPI, W> {
     }
 }
 
-impl<SPI: Instance, W: Word> Spi<SPI, W> {
+impl<SPI: Instance, MODE: CommunicationMode<SUPPORTS_WRITE = Yes>, W: Word>
+    TransferWordsNonBlockingWrite<W> for Inner<SPI, MODE, W>
+where
+    Self: TransferWordsNonBlocking<W>,
+{
+    fn handle_write<OP: Op<W>>(
+        &mut self,
+        transaction: &mut Transaction<OP, W>,
+    ) -> Result<(), Error> {
+        if !transaction.is_write_complete() {
+            self.write_words_nonblocking(transaction)?;
+        }
+
+        // Keep writing to SPI if data to read is longer than data to write
+        let flush_remainder = transaction.tx_flush_remainder();
+        if transaction.is_write_complete() && flush_remainder > 0 {
+            let count = self.flush_tx_fifo(flush_remainder)?;
+            transaction.advance_write_idx(count)
+        }
+
+        Ok(())
+    }
+}
+
+impl<SPI: Instance, MODE: CommunicationMode, W: Word> Spi<SPI, MODE, W> {
     /// Set the word size for a transaction. Can only be changed when the peripheral is disabled
     /// Must be less than or equal to the maximum size denoted by the const generic size parameter
     /// (W)
@@ -842,7 +977,10 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
 }
 
 /// Non-blocking SPI operations
-impl<SPI: Instance, W: Word> Spi<SPI, W> {
+impl<SPI: Instance, MODE: CommunicationMode, W: Word> Spi<SPI, MODE, W>
+where
+    Inner<SPI, MODE, W>: TransferWordsNonBlocking<W>,
+{
     fn transfer_nonblocking_internal<OP: Op<W>>(
         &mut self,
         mut transaction: Transaction<OP, W>,
@@ -858,6 +996,21 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
         }
     }
 
+    fn transfer_internal<OP: Op<W>>(
+        &mut self,
+        mut transaction: Transaction<OP, W>,
+    ) -> Result<(), Error> {
+        while let Some(t) = self.transfer_nonblocking_internal(transaction)? {
+            transaction = t;
+        }
+        Ok(())
+    }
+}
+
+/// Non-blocking SPI operations
+impl<SPI: Instance, MODE: CommunicationMode<SUPPORTS_WRITE = Yes>, W: Word>
+    Spi<SPI, MODE, W>
+{
     fn start_write<'a>(
         &mut self,
         words: &'a [W],
@@ -866,12 +1019,8 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
             !words.is_empty(),
             "Write buffer should not be non-zero length"
         );
-        let communication_mode = self.inner.communication_mode();
-        if communication_mode == CommunicationMode::SimplexReceiver {
-            return Err(Error::InvalidOperation);
-        }
 
-        if communication_mode == CommunicationMode::HalfDuplex {
+        if MODE::COMM == COMM::HalfDuplex {
             self.inner.set_dir_transmitter();
         }
 
@@ -879,18 +1028,19 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
 
         Ok(Transaction::<Write<'a, W>, W>::write(words))
     }
+}
 
+/// Non-blocking SPI operations
+impl<SPI: Instance, MODE: CommunicationMode<SUPPORTS_READ = Yes>, W: Word>
+    Spi<SPI, MODE, W>
+{
     fn start_read<'a>(
         &mut self,
         buf: &'a mut [W],
     ) -> Result<Transaction<Read<'a, W>, W>, Error> {
         assert!(!buf.is_empty(), "Read buffer should not be non-zero length");
-        let communication_mode = self.inner.communication_mode();
-        if communication_mode == CommunicationMode::SimplexTransmitter {
-            return Err(Error::InvalidOperation);
-        }
 
-        if communication_mode == CommunicationMode::HalfDuplex {
+        if MODE::COMM == COMM::HalfDuplex {
             self.inner.set_dir_receiver();
         }
 
@@ -898,7 +1048,9 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
 
         Ok(Transaction::<Read<'a, W>, W>::read(buf))
     }
-
+}
+/// Non-blocking SPI operations
+impl<SPI: Instance, W: Word> Spi<SPI, communication_mode::FullDuplex, W> {
     fn start_transfer<'a>(
         &mut self,
         read: &'a mut [W],
@@ -906,11 +1058,8 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
     ) -> Result<Transaction<Transfer<'a, W>, W>, Error> {
         assert!(
             !read.is_empty() && !write.is_empty(),
-            "Transfer buffers should not be non-zero length"
+            "Transfer buffers should not be zero length"
         );
-        if self.inner.communication_mode() != CommunicationMode::FullDuplex {
-            return Err(Error::InvalidOperation);
-        }
 
         self.setup_transaction(core::cmp::max(read.len(), write.len()));
 
@@ -923,11 +1072,8 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
     ) -> Result<Transaction<TransferInplace<'a, W>, W>, Error> {
         assert!(
             !words.is_empty(),
-            "Transfer buffer should not be non-zero length"
+            "Transfer buffer should not be zero length"
         );
-        if self.inner.communication_mode() != CommunicationMode::FullDuplex {
-            return Err(Error::InvalidOperation);
-        }
 
         self.setup_transaction(words.len());
 
@@ -938,36 +1084,10 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
 }
 
 // Blocking SPI operations
-impl<SPI: Instance, W: Word> Spi<SPI, W> {
-    fn transfer_internal<OP: Op<W>>(
-        &mut self,
-        mut transaction: Transaction<OP, W>,
-    ) -> Result<(), Error> {
-        while let Some(t) = self.transfer_nonblocking_internal(transaction)? {
-            transaction = t;
-        }
-        Ok(())
-    }
-
-    /// Write-only transfer
-    fn write(&mut self, words: &[W]) -> Result<(), Error> {
-        if words.is_empty() {
-            return Ok(());
-        }
-
-        let transaction = self.start_write(words)?;
-        self.transfer_internal(transaction)
-    }
-
-    /// Read-only transfer
-    fn read(&mut self, words: &mut [W]) -> Result<(), Error> {
-        if words.is_empty() {
-            return Ok(());
-        }
-        let transaction = self.start_read(words)?;
-        self.transfer_internal(transaction)
-    }
-
+impl<SPI: Instance, W: Word> Spi<SPI, communication_mode::FullDuplex, W>
+where
+    Inner<SPI, communication_mode::FullDuplex, W>: TransferWordsNonBlocking<W>,
+{
     /// Full duplex transfer
     fn transfer(&mut self, read: &mut [W], write: &[W]) -> Result<(), Error> {
         if read.is_empty() && write.is_empty() {
@@ -985,6 +1105,39 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
         }
 
         let transaction = self.start_transfer_inplace(words)?;
+        self.transfer_internal(transaction)
+    }
+}
+
+// Blocking SPI operations
+impl<SPI: Instance, MODE: CommunicationMode<SUPPORTS_WRITE = Yes>, W: Word>
+    Spi<SPI, MODE, W>
+where
+    Inner<SPI, MODE, W>: TransferWordsNonBlocking<W>,
+{
+    /// Write-only transfer
+    fn write(&mut self, words: &[W]) -> Result<(), Error> {
+        if words.is_empty() {
+            return Ok(());
+        }
+
+        let transaction = self.start_write(words)?;
+        self.transfer_internal(transaction)
+    }
+}
+
+// Blocking SPI operations
+impl<SPI: Instance, MODE: CommunicationMode<SUPPORTS_READ = Yes>, W: Word>
+    Spi<SPI, MODE, W>
+where
+    Inner<SPI, MODE, W>: TransferWordsNonBlocking<W>,
+{
+    /// Read-only transfer
+    fn read(&mut self, words: &mut [W]) -> Result<(), Error> {
+        if words.is_empty() {
+            return Ok(());
+        }
+        let transaction = self.start_read(words)?;
         self.transfer_internal(transaction)
     }
 }

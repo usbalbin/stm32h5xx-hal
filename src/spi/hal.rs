@@ -2,7 +2,10 @@ use embedded_hal::spi::{
     Error as HalError, ErrorKind, ErrorType, Operation, SpiBus, SpiDevice,
 };
 
-use super::{Error, Instance, Spi, Word};
+use super::{
+    config::{communication_mode, Yes},
+    CommunicationMode, Error, Instance, Spi, TransferWordsNonBlocking, Word,
+};
 
 impl HalError for Error {
     fn kind(&self) -> ErrorKind {
@@ -19,11 +22,16 @@ impl HalError for Error {
     }
 }
 
-impl<SPI, W: Word> ErrorType for Spi<SPI, W> {
+impl<SPI, MODE: CommunicationMode, W: Word> ErrorType for Spi<SPI, MODE, W> {
     type Error = Error;
 }
 
-impl<SPI: Instance, W: Word> SpiBus<W> for Spi<SPI, W> {
+impl<SPI: Instance, W: Word> SpiBus<W>
+    for Spi<SPI, communication_mode::FullDuplex, W>
+where
+    super::Inner<SPI, communication_mode::FullDuplex, W>:
+        TransferWordsNonBlocking<W>,
+{
     fn read(&mut self, words: &mut [W]) -> Result<(), Self::Error> {
         Spi::read(self, words)
     }
@@ -53,6 +61,111 @@ impl<SPI: Instance, W: Word> SpiBus<W> for Spi<SPI, W> {
     }
 }
 
+impl<SPI: Instance, W: Word> SpiBus<W>
+    for Spi<SPI, communication_mode::HalfDuplex, W>
+where
+    super::Inner<SPI, communication_mode::HalfDuplex, W>:
+        TransferWordsNonBlocking<W>,
+{
+    fn read(&mut self, words: &mut [W]) -> Result<(), Self::Error> {
+        Spi::read(self, words)
+    }
+
+    fn write(&mut self, words: &[W]) -> Result<(), Self::Error> {
+        Spi::write(self, words)
+    }
+
+    fn transfer(
+        &mut self,
+        _read: &mut [W],
+        _write: &[W],
+    ) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn transfer_in_place(
+        &mut self,
+        _words: &mut [W],
+    ) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        // This is handled within each of the above functions
+        Ok(())
+    }
+}
+
+impl<SPI: Instance, W: Word> SpiBus<W>
+    for Spi<SPI, communication_mode::SimplexReceiver, W>
+where
+    super::Inner<SPI, communication_mode::SimplexReceiver, W>:
+        TransferWordsNonBlocking<W>,
+{
+    fn read(&mut self, words: &mut [W]) -> Result<(), Self::Error> {
+        Spi::read(self, words)
+    }
+
+    fn write(&mut self, _words: &[W]) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn transfer(
+        &mut self,
+        _read: &mut [W],
+        _write: &[W],
+    ) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn transfer_in_place(
+        &mut self,
+        _words: &mut [W],
+    ) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        // This is handled within each of the above functions
+        Ok(())
+    }
+}
+
+impl<SPI: Instance, W: Word> SpiBus<W>
+    for Spi<SPI, communication_mode::SimplexTransmitter, W>
+where
+    super::Inner<SPI, communication_mode::SimplexTransmitter, W>:
+        TransferWordsNonBlocking<W>,
+{
+    fn read(&mut self, _words: &mut [W]) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn write(&mut self, words: &[W]) -> Result<(), Self::Error> {
+        Spi::write(self, words)
+    }
+
+    fn transfer(
+        &mut self,
+        _read: &mut [W],
+        _write: &[W],
+    ) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn transfer_in_place(
+        &mut self,
+        _words: &mut [W],
+    ) -> Result<(), Self::Error> {
+        unimplemented!()
+    }
+
+    fn flush(&mut self) -> Result<(), Self::Error> {
+        // This is handled within each of the above functions
+        Ok(())
+    }
+}
+
 trait OperationExt {
     fn len(&self) -> usize;
 }
@@ -71,7 +184,11 @@ impl<W> OperationExt for Operation<'_, W> {
     }
 }
 
-impl<SPI: Instance, W: Word> Spi<SPI, W> {
+impl<SPI: Instance, W: Word> Spi<SPI, communication_mode::FullDuplex, W>
+where
+    super::Inner<SPI, communication_mode::FullDuplex, W>:
+        TransferWordsNonBlocking<W>,
+{
     #[inline(always)]
     fn perform_operation(
         &mut self,
@@ -93,7 +210,12 @@ impl<SPI: Instance, W: Word> Spi<SPI, W> {
     }
 }
 
-impl<SPI: Instance, W: Word> SpiDevice<W> for Spi<SPI, W> {
+impl<SPI: Instance, W: Word> SpiDevice<W>
+    for Spi<SPI, communication_mode::FullDuplex, W>
+where
+    super::Inner<SPI, communication_mode::FullDuplex, W>:
+        TransferWordsNonBlocking<W>,
+{
     fn transaction(
         &mut self,
         operations: &mut [Operation<'_, W>],
